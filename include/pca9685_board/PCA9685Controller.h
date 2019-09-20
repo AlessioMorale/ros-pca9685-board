@@ -20,7 +20,7 @@ namespace pca9685_board
         void pwm_write_(int pin, int on, int off);
         void reset_all_();
 
-        int io_handle_;
+        int file;
     };
 }
 

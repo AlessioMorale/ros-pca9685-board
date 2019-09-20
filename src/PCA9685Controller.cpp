@@ -1,8 +1,13 @@
-#include <wiringPi.h>
-#include <wiringPiI2C.h>
-
 #include "pca9685_board/PCA9685Controller.h"
-
+extern "C" {
+#include <linux/types.h>
+#include <linux/i2c-dev.h>
+#include <sys/ioctl.h>
+#include <i2c/smbus.h>
+#include <fcntl.h>
+}
+#include <cstring>
+#include <ros/ros.h>
 
 #define PIN_ALL      16
 #define PIN_BASE     300
@@ -36,8 +41,7 @@ int base_register_(const int pin)
 
 PCA9685Controller::PCA9685Controller()
 {
-    // initialize wiringPi lib
-    wiringPiSetupGpio();
+    if(file) close(file);
 }
 
 PCA9685Controller::~PCA9685Controller()
@@ -53,23 +57,19 @@ PCA9685Controller::~PCA9685Controller()
  */
 int PCA9685Controller::setup(const int i2c_address)
 {
-    // Create a node with 16 pins [0..15] + [16] for all
-    struct wiringPiNodeStruct *node = wiringPiNewNode(PIN_BASE, PIN_ALL + 1);
-
-    // Check if pin_base is available
-    if (!node) return -1;
-
-    // Check i2c address
-    io_handle_ = wiringPiI2CSetup(i2c_address);
-    if (io_handle_ < 0) return io_handle_;
+    file = open("/dev/i2c-1", O_RDWR);
+    if(ioctl(file, I2C_SLAVE, i2c_address) < 0) {
+        ROS_ERROR("i2c device open failed");
+        return false;
+    }
 
     // Setup the chip. Enable auto-increment of registers.
-    int settings = wiringPiI2CReadReg8(io_handle_, MODE1) & 0x7F;
-    int auto_inc = settings | 0x20;
-    wiringPiI2CWriteReg8(io_handle_, MODE1, auto_inc);
+    int settings = i2c_smbus_read_byte_data(file, MODE1);
+    int auto_inc = (settings & 0x7F) | 0x20;
+    i2c_smbus_write_byte_data(file, MODE1, auto_inc);
 
     reset_all_();
-    return io_handle_;
+    return file;
 }
 
 /**
@@ -101,20 +101,20 @@ void PCA9685Controller::set_pwm_freq(float pwm_freq)
     int prescale = (int)(25000000.0f / (MAX_PWM * pwm_freq) - 0.5f);
 
     // Get settings and calc bytes for the different states.
-    int settings = wiringPiI2CReadReg8(io_handle_, MODE1) & 0x7F; // Set restart bit to 0
+    int settings = i2c_smbus_read_byte_data(file, MODE1) & 0x7F; // Set restart bit to 0
     int sleep    = settings | SLEEP; // Set sleep bit to 1
     int wake     = settings & WAKE;  // Set sleep bit to 0
     int restart  = wake | RESTART;   // Set restart bit to 1
 
     // Go to sleep, set prescale and wake up again.
-    wiringPiI2CWriteReg8(io_handle_, MODE1, sleep);
-    wiringPiI2CWriteReg8(io_handle_, PRESCALE, prescale);
-    wiringPiI2CWriteReg8(io_handle_, MODE1, wake);
+    i2c_smbus_write_byte_data(file, MODE1, sleep);
+    i2c_smbus_write_byte_data(file, PRESCALE, prescale);
+    i2c_smbus_write_byte_data(file, MODE1, wake);
 
     // Now wait a millisecond until oscillator finished
     // stabilizing and restart PWM.
-    delay(1);
-    wiringPiI2CWriteReg8(io_handle_, MODE1, restart);
+    ros::Duration(0.005).sleep();
+    i2c_smbus_write_byte_data(file, MODE1, restart);
 }
 
 /**
@@ -125,12 +125,12 @@ void PCA9685Controller::set_pwm_freq(float pwm_freq)
 void PCA9685Controller::full_off_(int pin, int tf)
 {
     int reg   = base_register_(pin) + 3;  // CHANNELX_OFF_H
-    int state = wiringPiI2CReadReg8(io_handle_, reg);
+    int state = i2c_smbus_read_byte_data(file, reg);
 
     // Set bit 4 to 1 or 0 accordingly
     state = tf ? (state | SLEEP) : (state & WAKE);
 
-    wiringPiI2CWriteReg8(io_handle_, reg, state);
+    i2c_smbus_write_byte_data(file, reg, state);
 }
 
 /**
@@ -141,12 +141,12 @@ void PCA9685Controller::full_off_(int pin, int tf)
 void PCA9685Controller::full_on_(int pin, int tf)
 {
     int reg = base_register_(pin) + 1;  // CHANNELX_ON_H
-    int state = wiringPiI2CReadReg8(io_handle_, reg);
+    int state = i2c_smbus_read_byte_data(file, reg);
 
     // Set bit 4 to 1 or 0 accordingly
     state = tf ? (state | SLEEP) : (state & WAKE);
 
-    wiringPiI2CWriteReg8(io_handle_, reg, state);
+    i2c_smbus_write_byte_data(file, reg, state);
 
     // For simplicity, we set full-off to 0
     // because it has priority over full-on
@@ -163,8 +163,8 @@ void PCA9685Controller::pwm_write_(int pin, int on, int off)
 
     // Write to on and off registers and mask the
     // 12 lowest bits of data to overwrite full-on and off
-    wiringPiI2CWriteReg16(io_handle_, reg,     on & 0x0FFF);
-    wiringPiI2CWriteReg16(io_handle_, reg + 2, off & 0x0FFF);
+    i2c_smbus_write_word_data(file, reg,     on & 0x0FFF);
+    i2c_smbus_write_word_data(file, reg + 2, off & 0x0FFF);
 }
 
 /**
@@ -172,6 +172,6 @@ void PCA9685Controller::pwm_write_(int pin, int on, int off)
  */
 void PCA9685Controller::reset_all_()
 {
-    wiringPiI2CWriteReg16(io_handle_, ALL_CHANNELS_ON_L,     0x0);
-    wiringPiI2CWriteReg16(io_handle_, ALL_CHANNELS_ON_L + 2, 0x1000);
+    i2c_smbus_write_word_data(file, ALL_CHANNELS_ON_L,     0x0);
+    i2c_smbus_write_word_data(file, ALL_CHANNELS_ON_L + 2, 0x1000);
 }

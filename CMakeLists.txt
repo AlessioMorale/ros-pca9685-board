@@ -4,8 +4,6 @@ add_compile_options(-std=c++11)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 
-find_library(wiringPi_LIB wiringPi)
-
 find_package(catkin REQUIRED COMPONENTS
     roscpp
     std_msgs
@@ -26,8 +24,11 @@ set(SOURCES
     src/PCA9685Controller.cpp
 )
 
-add_executable(pca9685_board_node ${SOURCES})
-target_link_libraries(pca9685_board_node
+add_executable(${PROJECT_NAME}_node ${SOURCES})
+target_link_libraries(${PROJECT_NAME}_node
     ${catkin_LIBRARIES}
-    ${wiringPi_LIB}
+    i2c
 )
+add_dependencies(${PROJECT_NAME}_node pca9685_board_generate_messages_cpp)
+
+set_target_properties(${PROJECT_NAME}_node PROPERTIES OUTPUT_NAME ${PROJECT_NAME}_node PREFIX "")
