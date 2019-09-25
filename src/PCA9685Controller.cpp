@@ -14,6 +14,7 @@ extern "C" {
 #define MAX_PWM      4096
 #define MIN_PWM_FREQ 40
 #define MAX_PWM_FREQ 1000
+#define SWRST 0x06
 
 // Setup registers, etc.
 enum pca9685_reg {
@@ -28,6 +29,7 @@ enum pca9685_reg {
     SLEEP              = 0x10,
     WAKE               = 0xEF
 };
+
 
 using namespace pca9685_board;
 
@@ -62,12 +64,13 @@ int PCA9685Controller::setup(const int i2c_address)
         ROS_ERROR("i2c device open failed");
         return false;
     }
-
+    i2c_smbus_write_byte_data(file, MODE1, SWRST);
+    ros::Duration(0.10).sleep();
     // Setup the chip. Enable auto-increment of registers.
-    int settings = i2c_smbus_read_byte_data(file, MODE1);
-    int auto_inc = (settings & 0x7F) | 0x20;
+    int settings = i2c_smbus_read_byte_data(file, MODE1) & 0x7F;
+    int auto_inc = settings | 0x20;
     i2c_smbus_write_byte_data(file, MODE1, auto_inc);
-
+    i2c_smbus_write_byte_data(file, MODE2, 0x04);
     reset_all_();
     return file;
 }
