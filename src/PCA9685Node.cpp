@@ -38,11 +38,17 @@ PCA9685Node::PCA9685Node()
     configure_servo_("throttle");
     configure_servo_("steering");
 
+    std::string absolute_topic_name;
+    std::string twist_topic_name;
+
+    nh_.param("/servos/absolute_topic", absolute_topic_name, (std::string)"/servo_absolute");
+    nh_.param("/servos/twist_topic", twist_topic_name, (std::string)"/servos_drive");
+
     // initiate subscribers
     abs_sub_ = nh_.subscribe<pca9685_board::Servo>(
-        "servo_absolute", 1, &PCA9685Node::servo_absolute_callback_, this);
+        absolute_topic_name, 1, &PCA9685Node::servo_absolute_callback_, this);
     drive_sub_ = nh_.subscribe<geometry_msgs::Twist>(
-        "servos_drive", 10, &PCA9685Node::servos_drive_callback_, this);
+        twist_topic_name, 10, &PCA9685Node::servos_drive_callback_, this);
 }
 
 /**
